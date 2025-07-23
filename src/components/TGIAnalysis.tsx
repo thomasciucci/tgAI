@@ -268,7 +268,7 @@ const TGIAnalysis: React.FC<TGIAnalysisProps> = ({ data }) => {
     });
 
     const layout = {
-      title: `Tumor Growth Inhibition Over Time (vs ${controlGroup}) - Statistical Analysis`,
+      title: { text: `Tumor Growth Inhibition Over Time (vs ${controlGroup}) - Statistical Analysis` },
       xaxis: { 
         title: 'Study Day',
         showgrid: true,
@@ -507,7 +507,7 @@ const TGIAnalysis: React.FC<TGIAnalysisProps> = ({ data }) => {
     }
 
     const layout = {
-      title: plotTitle,
+      title: { text: plotTitle },
       xaxis: { 
         title: xAxisTitle,
         showticklabels: false,

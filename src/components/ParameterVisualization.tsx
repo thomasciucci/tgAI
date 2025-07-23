@@ -168,7 +168,7 @@ const ParameterVisualization: React.FC<ParameterVisualizationProps> = ({
     }
 
     const layout = {
-      title: `${selectedParameter} Over Time`,
+      title: { text: `${selectedParameter} Over Time` },
       xaxis: { 
         title: 'Study Day',
         showgrid: true,
@@ -277,7 +277,7 @@ const ParameterVisualization: React.FC<ParameterVisualizationProps> = ({
 
     // Create layout with multiple y-axes (subplots)
     const layout: any = {
-      title: `${selectedParameter} Over Time - Individual Animals by Group`,
+      title: { text: `${selectedParameter} Over Time - Individual Animals by Group` },
       showlegend: false,
       plot_bgcolor: 'white',
       paper_bgcolor: 'white',

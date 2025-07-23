@@ -103,7 +103,7 @@ const AnimalTimelineChart: React.FC<{ animal?: AnimalRecord }> = ({ animal }) =>
         layout={{
           width: 700,
           height: 400,
-          title: `Timeline for Animal ${animal.animalId}`,
+          title: { text: `Timeline for Animal ${animal.animalId}` },
           xaxis: { title: 'Study Day' },
           yaxis: { title: 'Value' }
         }}
