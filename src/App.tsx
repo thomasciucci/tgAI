@@ -655,6 +655,15 @@ function App() {
           <Typography variant="subtitle1" sx={{ color: '#5C0037', fontWeight: 500 }}>
             Upload, analyze, and visualize your preclinical animal study data entirely in your browser.
           </Typography>
+          <Typography variant="caption" sx={{ 
+            display: 'block', 
+            mt: 1, 
+            color: '#8A0051', 
+            fontSize: '0.75rem',
+            opacity: 0.7
+          }}>
+            v2.1 - Global PDF Export | Separated Visualizations | Updated: {new Date().toISOString().split('T')[0]}
+          </Typography>
         </Box>
         <Box sx={{ my: 4 }}>
           {/* File Upload */}
