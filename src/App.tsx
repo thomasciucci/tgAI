@@ -1,15 +1,19 @@
 import React, { useRef, useState } from 'react';
-import { Container, Typography, Box, Paper, Grid, Button, Checkbox, FormControlLabel, TextField } from '@mui/material';
+import { Container, Typography, Box, Paper, Grid, Button, Checkbox, FormControlLabel, TextField, CircularProgress } from '@mui/material';
+import { PictureAsPdf } from '@mui/icons-material';
 import FileUpload, { triggerNextSheetProcessing } from './components/FileUpload';
 import type { ParsedData } from './components/FileUpload';
 import DataTable from './components/DataTable';
 import Charts from './components/Charts';
+import ParameterVisualization from './components/ParameterVisualization';
+import TGIAnalysis from './components/TGIAnalysis';
 import { AnimalDataManager } from './utils/AnimalDataManager';
 import type { AnimalRecord } from './utils/AnimalDataManager';
 import Plot from 'react-plotly.js';
 import ColumnMappingDialog from './components/ColumnMappingDialog';
 import MetadataImportDialog from './components/MetadataImportDialog';
 import { Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
+import { PDFExport } from './utils/PDFExport';
 
 // Simple timeline table for demonstration
 const AnimalTimelineView: React.FC<{ animal?: AnimalRecord }> = ({ animal }) => {
@@ -194,6 +198,7 @@ function App() {
   const [data, setData] = useState<ParsedData | null>(null);
   const [allAnimals, setAllAnimals] = useState<AnimalRecord[]>([]);
   const [selectedAnimalId, setSelectedAnimalId] = useState<string | null>(null);
+  const [isExportingGlobal, setIsExportingGlobal] = useState(false);
   // For per-tab mapping
   const [pendingTabs, setPendingTabs] = useState<{ tabName: string; columns: string[]; rows: ParsedData }[]>([]);
   const [currentTabIndex, setCurrentTabIndex] = useState(0);
@@ -234,50 +239,73 @@ function App() {
     }
   }, [availableParameters, selectedParameter]);
 
+  // Track tabs waiting for individual data mapping after grouped header confirmation
+  const [tabsAwaitingDataMapping, setTabsAwaitingDataMapping] = useState<any[]>([]);
+  // Track which tabs from the current group have been processed
+  const [processedTabsFromCurrentGroup, setProcessedTabsFromCurrentGroup] = useState<string[]>([]);
+
   // Called after user selects tabs and data is parsed for each
-  // Now receives individual tabs one at a time
-  const handleTabsParsed = (tabs: { tabName: string; columns: string[]; rows: ParsedData; currentTabNumber?: number; totalTabs?: number; currentUINumber?: number; totalUIs?: number }[]) => {
-    // Since FileUpload now sends one tab at a time, we should receive a single tab
-    const newTab = tabs[0];
-    if (!newTab) return;
+  // Now receives individual tabs one at a time or batched tabs with identical headers
+  const handleTabsParsed = (tabs: { tabName: string; columns: string[]; rows: ParsedData; currentTabNumber?: number; totalTabs?: number; currentUINumber?: number; totalUIs?: number; isGroupedMapping?: boolean }[]) => {
+    console.log(`Received ${tabs.length} tab(s) for mapping`);
     
-    console.log(`Received tab: ${newTab.tabName} with ${newTab.columns.length} columns`);
+    // Add all received tabs to our accumulated tabs
+    setAllTabs(prev => [...prev, ...tabs]);
     
-    // Add this tab to our accumulated tabs
-    setAllTabs(prev => {
-      const updated = [...prev, newTab];
-      console.log(`Total tabs accumulated: ${updated.length}`);
-      return updated;
-    });
-    
-    // Set this as the pending tab to show mapping dialog with progress info
-    setPendingTabs([{ ...newTab, currentTabNumber: newTab.currentTabNumber, totalTabs: newTab.totalTabs, currentUINumber: newTab.currentUINumber, totalUIs: newTab.totalUIs }]);
-    setCurrentTabIndex(0);
-    setShowMappingDialog(true);
+    if (tabs.length > 1 && tabs[0].isGroupedMapping) {
+      // Multiple tabs with identical headers - save them for individual data mapping later
+      console.log('=== SETTING UP GROUPED TABS ===');
+      console.log('Received grouped tabs with identical headers - will show individual data mapping');
+      console.log('All tabs in group:', tabs.map(t => t.tabName));
+      setTabsAwaitingDataMapping(tabs);
+      setProcessedTabsFromCurrentGroup([]); // Reset processed tabs for new group
+      
+      // Show data mapping for the first tab
+      console.log('*** SHOWING FIRST TAB DATA MAPPING ***', tabs[0].tabName);
+      setPendingTabs([{ ...tabs[0], isGroupedMapping: false, currentTabNumber: 1, totalTabs: tabs.length }]);
+      setCurrentTabIndex(0);
+      setShowMappingDialog(true);
+    } else {
+      // Single tab or individual processing
+      const newTab = tabs[0];
+      if (!newTab) return;
+      
+      console.log(`Received individual tab: ${newTab.tabName}`);
+      setPendingTabs([newTab]);
+      setCurrentTabIndex(0);
+      setShowMappingDialog(true);
+    }
   };
 
   // Called when user confirms mapping for a tab
   const handleMappingConfirm = (mapping: { animalIdColumn: string; timeColumn: string; parameterColumns: string[] }) => {
-    const tab = pendingTabs[currentTabIndex];
-    const newTabMapping = { tabName: tab.tabName, mapping, rows: tab.rows };
+    const currentTab = pendingTabs[0];
+    console.log(`Processing mapping for tab: ${currentTab.tabName}`);
     
-    console.log(`Tab ${tab.tabName} mapped with parameters:`, mapping.parameterColumns);
+    // Create mapping for current tab
+    const tabMapping = {
+      tabName: currentTab.tabName,
+      mapping,
+      rows: currentTab.rows
+    };
     
-    // Add this tab mapping to accumulated mappings
+    console.log(`Applying mapping to tab: ${tabMapping.tabName}`);
+    
+    // Add this tab mapping
     setTabMappings(prev => {
-      const updated = [...prev, newTabMapping];
+      const updated = [...prev, tabMapping];
       console.log(`Updated tab mappings:`, updated.map(t => ({ name: t.tabName, params: t.mapping.parameterColumns })));
       return updated;
     });
     
-    // Check if time column is a date in this tab
+    // Check for date columns in this tab
     const timeCol = mapping.timeColumn;
-    const firstRow = tab.rows.find(r => r[timeCol]);
+    const firstRow = currentTab.rows.find(r => r[timeCol]);
     if (firstRow && typeof firstRow[timeCol] === 'string' && isDateString(firstRow[timeCol])) {
       // Save for later conversion
-      setPendingDateTabs(prev => [...prev, tab]);
+      setPendingDateTabs(prev => [...prev, { tabName: tabMapping.tabName, rows: tabMapping.rows }]);
       setPendingDateMappings(prev => [...prev, mapping]);
-      setPendingDateRows(prev => [...prev, tab.rows]);
+      setPendingDateRows(prev => [...prev, tabMapping.rows]);
     }
     
     // Close current mapping dialog
@@ -285,7 +313,57 @@ function App() {
     setPendingTabs([]);
     setCurrentTabIndex(0);
     
-    console.log(`Tab mapped. Current tab mappings count: ${tabMappings.length + 1}`);
+    // Check if there are more tabs awaiting data mapping (from grouped headers)
+    console.log('=== CHECKING FOR MORE TABS ===');
+    console.log('tabsAwaitingDataMapping.length:', tabsAwaitingDataMapping.length);
+    console.log('tabsAwaitingDataMapping:', tabsAwaitingDataMapping.map(t => t.tabName));
+    console.log('currentTab.tabName:', currentTab.tabName);
+    console.log('processedTabsFromCurrentGroup before:', processedTabsFromCurrentGroup);
+    
+    if (tabsAwaitingDataMapping.length > 0) {
+      // Add current tab to processed list
+      const newProcessedTabs = [...processedTabsFromCurrentGroup, currentTab.tabName];
+      setProcessedTabsFromCurrentGroup(newProcessedTabs);
+      
+      console.log(`Processed tabs so far:`, newProcessedTabs);
+      console.log(`Total tabs in group:`, tabsAwaitingDataMapping.map(t => t.tabName));
+      
+      const remainingTabs = tabsAwaitingDataMapping.filter(tab => {
+        const isNotProcessed = !newProcessedTabs.includes(tab.tabName);
+        console.log(`Tab ${tab.tabName}: processed=${!isNotProcessed}, remaining=${isNotProcessed}`);
+        return isNotProcessed;
+      });
+      
+      console.log(`Remaining tabs count: ${remainingTabs.length}`);
+      console.log(`Remaining tabs:`, remainingTabs.map(t => t.tabName));
+      
+      if (remainingTabs.length > 0) {
+        console.log(`*** SHOWING NEXT TAB: ${remainingTabs[0].tabName} ***`);
+        const nextTab = remainingTabs[0];
+        const currentTabNumber = newProcessedTabs.length + 1; // Current processed + 1 for next
+        
+        // Show data mapping for next tab
+        setPendingTabs([{ 
+          ...nextTab, 
+          isGroupedMapping: false, 
+          currentTabNumber, 
+          totalTabs: tabsAwaitingDataMapping.length 
+        }]);
+        setCurrentTabIndex(0);
+        setShowMappingDialog(true);
+        console.log('*** DIALOG SHOULD SHOW NOW ***');
+        return;
+      } else {
+        // All tabs from the group have been processed
+        console.log('*** ALL TABS PROCESSED - CLEANING UP ***');
+        setTabsAwaitingDataMapping([]);
+        setProcessedTabsFromCurrentGroup([]);
+      }
+    } else {
+      console.log('*** NO TABS AWAITING DATA MAPPING ***');
+    }
+    
+    console.log(`Mapping complete for tab: ${currentTab.tabName}`);
     
     // Trigger next sheet processing in FileUpload component
     triggerNextSheetProcessing();
@@ -431,6 +509,46 @@ function App() {
   // FileUpload should parse each selected tab and call this with an array of { tabName, columns, rows }
 
   const selectedAnimal = allAnimals.find(a => a.animalId === (selectedAnimalId ? selectedAnimalId.trim() : ''));
+
+  // Global export function to export all visualization sections
+  const handleGlobalExportToPDF = async () => {
+    if (!data) return;
+
+    setIsExportingGlobal(true);
+    try {
+      // Get all visualization elements to export
+      const elements: HTMLElement[] = [];
+      
+      // Add data table
+      const dataTableElement = document.querySelector('[data-export="data-table"]') as HTMLElement;
+      if (dataTableElement) elements.push(dataTableElement);
+      
+      // Add parameter visualization
+      const parameterElement = document.querySelector('[data-export="parameter-visualization"]') as HTMLElement;
+      if (parameterElement) elements.push(parameterElement);
+      
+      // Add TGI analysis
+      const tgiElement = document.querySelector('[data-export="tgi-analysis"]') as HTMLElement;
+      if (tgiElement) elements.push(tgiElement);
+      
+      // Add waterfall analysis
+      const waterfallElement = document.querySelector('[data-export="waterfall-analysis"]') as HTMLElement;
+      if (waterfallElement) elements.push(waterfallElement);
+
+      if (elements.length > 0) {
+        await PDFExport.exportElementToPDF(elements[0].parentElement || elements[0], {
+          filename: 'tumor_study_complete_report',
+          includeTimestamp: true,
+          quality: 1.0
+        });
+      }
+    } catch (error) {
+      console.error('Global PDF export failed:', error);
+      alert('Failed to export PDF. Please try again.');
+    } finally {
+      setIsExportingGlobal(false);
+    }
+  };
 
   function mergeTabsAndContinue(allTabsToMerge: any[]) {
     const mergedMap = new Map();
@@ -626,15 +744,17 @@ function App() {
               open={showMappingDialog}
               columns={pendingTabs[currentTabIndex].columns}
               tabName={pendingTabs[currentTabIndex].tabName}
-              currentTabIndex={(pendingTabs[currentTabIndex] as any).currentUINumber || 1}
-              totalTabs={(pendingTabs[currentTabIndex] as any).totalUIs || 1}
+              currentTabIndex={(pendingTabs[currentTabIndex] as any).currentTabNumber || 1}
+              totalTabs={(pendingTabs[currentTabIndex] as any).totalTabs || 1}
+              isGroupedMapping={pendingTabs[currentTabIndex].isGroupedMapping || false}
+              allTabNames={pendingTabs.map(tab => tab.tabName)}
               onConfirm={handleMappingConfirm}
               onClose={() => setShowMappingDialog(false)}
             />
           )}
 
-          {/* Animal Table Display */}
-          {allAnimals.length > 0 && (
+          {/* Animal Table Display - PARKED FOR NOW */}
+          {false && allAnimals.length > 0 && (
             <Paper sx={{ 
               p: 3, 
               mb: 3,
@@ -701,7 +821,7 @@ function App() {
           )}
 
           {/* Data Table */}
-          <Paper sx={{ 
+          <Paper data-export="data-table" sx={{ 
             p: 3, 
             mb: 3,
             border: '1px solid #EFCCDB',
@@ -717,7 +837,7 @@ function App() {
                 display: 'flex',
                 alignItems: 'center',
                 '&::before': {
-                  content: '"3"',
+                  content: '"2"',
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -751,9 +871,54 @@ function App() {
             </Box>
           </Paper>
 
-          {/* Chart Area */}
-          <Paper sx={{ 
-            p: 3,
+          {/* Parameter Visualization */}
+          <Paper data-export="parameter-visualization" sx={{ 
+            p: 3, 
+            mb: 3,
+            border: '1px solid #EFCCDB',
+            borderRadius: 2,
+            '&:hover': {
+              boxShadow: '0 6px 25px rgba(138, 0, 81, 0.1)'
+            }
+          }}>
+            <Typography variant="h6" sx={{ 
+              color: '#8A0051', 
+              fontWeight: 600, 
+              mb: 2,
+              display: 'flex',
+              alignItems: 'center',
+              '&::before': {
+                content: '"3"',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 32,
+                height: 32,
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #8A0051 0%, #B8006B 100%)',
+                color: 'white',
+                fontSize: '0.9rem',
+                fontWeight: 700,
+                mr: 2
+              }
+            }}>
+              📊 Parameter Visualization
+            </Typography>
+            <Box sx={{ mt: 2 }}>
+              {data && availableParameters.length > 0 ? (
+                <ParameterVisualization data={data} availableParameters={availableParameters} />
+              ) : (
+                <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                  📊 No data available for parameter visualization
+                </Typography>
+              )}
+            </Box>
+          </Paper>
+
+          {/* TGI Analysis */}
+          <Paper data-export="tgi-analysis" sx={{ 
+            p: 3, 
+            mb: 3,
             border: '1px solid #EFCCDB',
             borderRadius: 2,
             '&:hover': {
@@ -781,21 +946,102 @@ function App() {
                 mr: 2
               }
             }}>
-              Visualizations
+              🔬 TGI Analysis
             </Typography>
             <Box sx={{ mt: 2 }}>
-              {data ? <Charts data={data} /> : (
-                <Grid container spacing={2}>
-                  <Grid item xs={12} md={6}>
-                    <Typography color="text.secondary">[Tumor growth chart here]</Typography>
-                  </Grid>
-                  <Grid item xs={12} md={6}>
-                    <Typography color="text.secondary">[Waterfall/weight chart here]</Typography>
-                  </Grid>
-                </Grid>
+              {data && data.some(row => ['Volume', 'TumorVolume', 'Tumor_Volume', 'volume', 'tumor_volume'].some(col => row[col] !== undefined && row[col] !== null && row[col] !== '')) ? (
+                <TGIAnalysis data={data} />
+              ) : (
+                <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                  🔬 TGI Analysis not available - requires tumor volume data
+                </Typography>
               )}
             </Box>
           </Paper>
+
+          {/* Waterfall Analysis */}
+          <Paper data-export="waterfall-analysis" sx={{ 
+            p: 3, 
+            mb: 3,
+            border: '1px solid #EFCCDB',
+            borderRadius: 2,
+            '&:hover': {
+              boxShadow: '0 6px 25px rgba(138, 0, 81, 0.1)'
+            }
+          }}>
+            <Typography variant="h6" sx={{ 
+              color: '#8A0051', 
+              fontWeight: 600, 
+              mb: 2,
+              display: 'flex',
+              alignItems: 'center',
+              '&::before': {
+                content: '"5"',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 32,
+                height: 32,
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #8A0051 0%, #B8006B 100%)',
+                color: 'white',
+                fontSize: '0.9rem',
+                fontWeight: 700,
+                mr: 2
+              }
+            }}>
+              📈 Waterfall Analysis
+            </Typography>
+            <Box sx={{ mt: 2 }}>
+              {data && data.some(row => ['Volume', 'TumorVolume', 'Tumor_Volume', 'volume', 'tumor_volume'].some(col => row[col] !== undefined && row[col] !== null && row[col] !== '')) ? (
+                <TGIAnalysis data={data} />
+              ) : (
+                <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                  📈 Waterfall Analysis not available - requires tumor volume data
+                </Typography>
+              )}
+            </Box>
+          </Paper>
+
+          {/* Global Export PDF Button */}
+          {data && (
+            <Box sx={{ textAlign: 'center', mt: 4, mb: 2 }}>
+              <Button
+                variant="contained"
+                size="large"
+                startIcon={isExportingGlobal ? <CircularProgress size={20} color="inherit" /> : <PictureAsPdf />}
+                onClick={handleGlobalExportToPDF}
+                disabled={isExportingGlobal}
+                sx={{
+                  background: 'linear-gradient(135deg, #8A0051 0%, #B8006B 100%)',
+                  color: 'white',
+                  fontWeight: 600,
+                  px: 4,
+                  py: 1.5,
+                  fontSize: '1.1rem',
+                  borderRadius: 3,
+                  boxShadow: '0 8px 25px rgba(138, 0, 81, 0.3)',
+                  '&:hover': {
+                    background: 'linear-gradient(135deg, #6D0040 0%, #950059 100%)',
+                    boxShadow: '0 12px 35px rgba(138, 0, 81, 0.4)',
+                    transform: 'translateY(-2px)',
+                  },
+                  '&:disabled': {
+                    background: '#ccc',
+                    color: '#666',
+                    boxShadow: 'none',
+                    transform: 'none'
+                  },
+                  transition: 'all 0.3s ease'
+                }}
+              >
+                {isExportingGlobal ? 'Exporting Complete Report...' : 'Export Complete Report to PDF'}
+              </Button>
+              <Typography variant="body2" sx={{ mt: 2, color: '#8A0051', fontStyle: 'italic' }}>
+                📄 Export all data tables and visualizations as a single PDF report
+              </Typography>
+            </Box>
+          )}
         </Box>
       </Paper>
       {/* Metadata import prompt */}

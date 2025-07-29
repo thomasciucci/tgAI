@@ -7,7 +7,7 @@ import { Box, Typography, Paper, List, ListItem, ListItemIcon, Checkbox, ListIte
 export type ParsedData = Record<string, any>[];
 
 interface FileUploadProps {
-  onTabsParsed: (tabs: { tabName: string; columns: string[]; rows: ParsedData; currentTabNumber?: number; totalTabs?: number; currentUINumber?: number; totalUIs?: number }[]) => void;
+  onTabsParsed: (tabs: { tabName: string; columns: string[]; rows: ParsedData; currentTabNumber?: number; totalTabs?: number; currentUINumber?: number; totalUIs?: number; isGroupedMapping?: boolean }[]) => void;
   onAllTabsParsed?: (allTabs: { tabName: string; columns: string[]; rows: ParsedData }[]) => void;
 }
 
@@ -25,6 +25,63 @@ const HEADER_KEYWORDS = [
 ];
 
 const MAX_HEADER_SCAN_ROWS = 10;
+
+// Helper function to check if two header arrays are identical
+const areHeadersIdentical = (headers1: string[], headers2: string[]): boolean => {
+  if (headers1.length !== headers2.length) return false;
+  return headers1.every((header, index) => header === headers2[index]);
+};
+
+// Helper function to group tabs by identical headers
+const groupTabsByHeaders = (tabs: { tabName: string; columns: string[]; rows: ParsedData }[]): { tabs: { tabName: string; columns: string[]; rows: ParsedData }[]; hasIdenticalHeaders: boolean }[] => {
+  const groups: { tabs: { tabName: string; columns: string[]; rows: ParsedData }[]; hasIdenticalHeaders: boolean }[] = [];
+  
+  tabs.forEach(tab => {
+    // Find existing group with identical headers
+    const existingGroup = groups.find(group => 
+      group.tabs.length > 0 && areHeadersIdentical(group.tabs[0].columns, tab.columns)
+    );
+    
+    if (existingGroup) {
+      existingGroup.tabs.push(tab);
+      existingGroup.hasIdenticalHeaders = true;
+    } else {
+      groups.push({ tabs: [tab], hasIdenticalHeaders: false });
+    }
+  });
+  
+  // After all tabs are processed, update hasIdenticalHeaders flag correctly
+  groups.forEach(group => {
+    group.hasIdenticalHeaders = group.tabs.length > 1;
+  });
+  
+  console.log('Final groups after processing:', groups.map(g => ({ 
+    count: g.tabs.length, 
+    hasIdentical: g.hasIdenticalHeaders, 
+    names: g.tabs.map(t => t.tabName),
+    headers: g.tabs[0].columns 
+  })));
+  
+  // Debug: Show detailed headers for each tab
+  console.log('=== DETAILED HEADER COMPARISON ===');
+  tabs.forEach((tab, index) => {
+    console.log(`Tab ${index + 1} "${tab.tabName}" headers:`, tab.columns);
+  });
+  
+  if (tabs.length === 2) {
+    console.log('Headers match?', areHeadersIdentical(tabs[0].columns, tabs[1].columns));
+    console.log('Tab 1 header count:', tabs[0].columns.length);
+    console.log('Tab 2 header count:', tabs[1].columns.length);
+    
+    // Show differences
+    const diff1 = tabs[0].columns.filter(h => !tabs[1].columns.includes(h));
+    const diff2 = tabs[1].columns.filter(h => !tabs[0].columns.includes(h));
+    if (diff1.length > 0) console.log('Headers only in Tab 1:', diff1);
+    if (diff2.length > 0) console.log('Headers only in Tab 2:', diff2);
+  }
+  
+  return groups;
+};
 
 const FileUpload: React.FC<FileUploadProps> = ({ onTabsParsed, onAllTabsParsed }) => {
   const [sheetNames, setSheetNames] = useState<string[]>([]);
@@ -46,19 +103,122 @@ const FileUpload: React.FC<FileUploadProps> = ({ onTabsParsed, onAllTabsParsed }
   } | null>(null);
   // Trigger to continue processing next sheet
   const [shouldContinueProcessing, setShouldContinueProcessing] = useState(false);
+  // Track all groups and current group being processed
+  const [allHeaderGroups, setAllHeaderGroups] = useState<any[]>([]);
+  const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
+
+  // Process a group of tabs (either with identical headers or individual)
+  const processHeaderGroup = React.useCallback((group: { tabs: { tabName: string; columns: string[]; rows: ParsedData; headerRow?: any[]; dataRows?: any[][]; allRows?: any[][] }[]; hasIdenticalHeaders: boolean }, groupIndex: number, totalGroups: number) => {
+    const firstTab = group.tabs[0];
+    
+    if (group.hasIdenticalHeaders && group.tabs.length > 1) {
+      console.log(`Processing group with ${group.tabs.length} tabs with identical headers`);
+      
+      // Show single header preview for the group
+      setHeaderPreview({
+        tabName: `${group.tabs.length} tabs: ${group.tabs.map(t => t.tabName).join(', ')}`,
+        currentTabNumber: 1,
+        totalTabs: 1,
+        currentUINumber: 1,
+        totalUIs: 1,
+        headerRow: firstTab.headerRow || [],
+        dataRows: firstTab.dataRows || [],
+        allRows: firstTab.allRows || [],
+        onConfirm: (confirmedHeader, confirmedDataRows) => {
+          // Apply confirmed header to all tabs in the group
+          const processedTabs = group.tabs.map((tab, index) => {
+            const confirmedColumns: string[] = [];
+            let confirmedEmptyCount = 1;
+            confirmedHeader.forEach((h: any) => {
+              if (h && String(h).trim() !== '') {
+                confirmedColumns.push(String(h));
+              } else {
+                confirmedColumns.push(`_EMPTY_${confirmedEmptyCount++}`);
+              }
+            });
+            
+            return {
+              tabName: tab.tabName,
+              columns: confirmedColumns,
+              rows: tab.rows,
+              currentTabNumber: index + 1,
+              totalTabs: group.tabs.length,
+              currentUINumber: 1,
+              totalUIs: 1,
+              isGroupedMapping: true
+            };
+          });
+          
+          console.log(`Sending ${processedTabs.length} tabs with identical headers for mapping`);
+          onTabsParsed(processedTabs);
+          setHeaderPreview(null);
+        }
+      });
+    } else {
+      console.log(`Processing single tab: ${firstTab.tabName}`);
+      
+      // Show header preview for single tab
+      setHeaderPreview({
+        tabName: firstTab.tabName,
+        currentTabNumber: 1,
+        totalTabs: 1,
+        currentUINumber: 1,
+        totalUIs: 1,
+        headerRow: firstTab.headerRow || [],
+        dataRows: firstTab.dataRows || [],
+        allRows: firstTab.allRows || [],
+        onConfirm: (confirmedHeader, confirmedDataRows) => {
+          const confirmedColumns: string[] = [];
+          let confirmedEmptyCount = 1;
+          confirmedHeader.forEach((h: any) => {
+            if (h && String(h).trim() !== '') {
+              confirmedColumns.push(String(h));
+            } else {
+              confirmedColumns.push(`_EMPTY_${confirmedEmptyCount++}`);
+            }
+          });
+          
+          console.log(`Sending single tab for mapping: ${firstTab.tabName}`);
+          onTabsParsed([{
+            tabName: firstTab.tabName,
+            columns: confirmedColumns,
+            rows: firstTab.rows,
+            currentTabNumber: 1,
+            totalTabs: 1,
+            currentUINumber: 1,
+            totalUIs: 1,
+            isGroupedMapping: false
+          }]);
+          setHeaderPreview(null);
+        }
+      });
+    }
+  }, [onTabsParsed]);
+
+  // Continue to next group after current group is complete
+  const continueToNextGroup = React.useCallback(() => {
+    console.log('=== CONTINUING TO NEXT GROUP ===');
+    console.log('Current group index:', currentGroupIndex);
+    console.log('Total groups:', allHeaderGroups.length);
+    
+    const nextGroupIndex = currentGroupIndex + 1;
+    if (nextGroupIndex < allHeaderGroups.length) {
+      console.log(`Processing group ${nextGroupIndex + 1} of ${allHeaderGroups.length}`);
+      setCurrentGroupIndex(nextGroupIndex);
+      processHeaderGroup(allHeaderGroups[nextGroupIndex], nextGroupIndex, allHeaderGroups.length);
+    } else {
+      console.log('*** ALL GROUPS PROCESSED ***');
+      // Reset state
+      setAllHeaderGroups([]);
+      setCurrentGroupIndex(0);
+    }
+  }, [currentGroupIndex, allHeaderGroups, processHeaderGroup]);
 
   // Function to continue to next sheet after data mapping is complete
   const continueToNextSheet = React.useCallback(() => {
-    // Remove the current sheet from selectedSheets and process next
-    const remainingSheets = selectedSheets.slice(1);
-    setSelectedSheets(remainingSheets);
-    
-    console.log(`Continuing to next sheet, remaining: ${remainingSheets.length}`);
-    
-    if (remainingSheets.length > 0) {
-      setShouldContinueProcessing(true);
-    }
-  }, [selectedSheets]);
+    console.log('Processing complete - checking for next group');
+    continueToNextGroup();
+  }, [continueToNextGroup]);
 
   // Set the global function
   React.useEffect(() => {
@@ -189,86 +349,67 @@ const FileUpload: React.FC<FileUploadProps> = ({ onTabsParsed, onAllTabsParsed }
     onAllTabsParsed(allTabsData);
   }, [workbook, onAllTabsParsed]);
 
-  // When user confirms sheet selection, process the first selected sheet
+  // When user confirms sheet selection, process all selected sheets at once
   const handleConfirmSheets = () => {
     if (!workbook || selectedSheets.length === 0) return;
     
-    // Set original selection for progress tracking if not already set
-    if (originalSelectedSheets.length === 0) {
-      setOriginalSelectedSheets([...selectedSheets]);
-    }
+    console.log('Processing all selected sheets:', selectedSheets);
     
-    // Process the first selected sheet
-    const firstSheetName = selectedSheets[0];
-    const worksheet = workbook.Sheets[firstSheetName];
-    const raw = XLSX.utils.sheet_to_json(worksheet, { defval: '', header: 1 });
+    // Parse all selected sheets first
+    const allParsedTabs: { tabName: string; columns: string[]; rows: ParsedData; headerRow: any[]; dataRows: any[][]; allRows: any[][] }[] = [];
     
-    if (!Array.isArray(raw) || raw.length === 0) {
-      // Skip empty sheets and process next
-      const remainingSheets = selectedSheets.slice(1);
-      setSelectedSheets(remainingSheets);
-      if (remainingSheets.length > 0) {
-        handleConfirmSheets();
-      }
-      return;
-    }
-    
-    // Flexible header detection
-    const { headerRow, dataRows } = detectHeaderRow(raw);
-    
-    // Calculate progress - for UI numbering (each tab has 2 UIs: header + data)
-    const currentTabNumber = originalSelectedSheets.length - selectedSheets.length + 1;
-    const totalTabs = originalSelectedSheets.length;
-    const currentUINumber = (currentTabNumber - 1) * 2 + 1; // Header is 1st UI for each tab
-    const totalUIs = totalTabs * 2; // Each tab has header + data UI
-    
-    // Show header preview for this specific sheet
-    setHeaderPreview({
-      tabName: firstSheetName,
-      currentTabNumber,
-      totalTabs,
-      currentUINumber,
-      totalUIs,
-      headerRow,
-      dataRows,
-      allRows: raw,
-      onConfirm: (confirmedHeader, confirmedDataRows) => {
-        // Process this sheet
-        const confirmedColumns: string[] = [];
-        let confirmedEmptyCount = 1;
-        confirmedHeader.forEach((h: any) => {
+    selectedSheets.forEach(sheetName => {
+      const worksheet = workbook.Sheets[sheetName];
+      const raw = XLSX.utils.sheet_to_json(worksheet, { defval: '', header: 1 });
+      
+      if (Array.isArray(raw) && raw.length > 0) {
+        // Flexible header detection
+        const { headerRow, dataRows } = detectHeaderRow(raw);
+        
+        const columns: string[] = [];
+        let emptyCount = 1;
+        headerRow.forEach((h: any) => {
           if (h && String(h).trim() !== '') {
-            confirmedColumns.push(String(h));
+            columns.push(String(h));
           } else {
-            confirmedColumns.push(`_EMPTY_${confirmedEmptyCount++}`);
+            columns.push(`_EMPTY_${emptyCount++}`);
           }
         });
         
-        const rows = confirmedDataRows
+        const rows = dataRows
           .filter((row) => Array.isArray(row) && row.some(cell => cell !== undefined && cell !== null && cell !== ''))
           .map((row) =>
-            Object.fromEntries(confirmedColumns.map((col: string, i: number) => [col, row[i]]))
+            Object.fromEntries(columns.map((col: string, i: number) => [col, row[i]]))
           );
         
-        // Call onTabsParsed for this single tab - this will trigger the column mapping dialog
-        // We pass the confirmed data and keep track of remaining sheets for later processing
-        const dataUINumber = currentUINumber + 1; // Data UI is next after header UI
-        onTabsParsed([{
-          tabName: firstSheetName,
-          columns: confirmedColumns,
+        allParsedTabs.push({
+          tabName: sheetName,
+          columns,
           rows: rows as ParsedData,
-          currentTabNumber: currentTabNumber,
-          totalTabs: totalTabs,
-          currentUINumber: dataUINumber,
-          totalUIs: totalUIs
-        }]);
-        
-        setHeaderPreview(null);
-        console.log(`Header confirmed for sheet: ${firstSheetName}, now showing data mapping`);
-        
-        // DON'T remove from selectedSheets yet - we'll do that after data mapping is complete
+          headerRow,
+          dataRows,
+          allRows: raw
+        });
       }
     });
+    
+    if (allParsedTabs.length === 0) {
+      console.log('No valid sheets found');
+      return;
+    }
+    
+    // Group tabs by identical headers
+    const headerGroups = groupTabsByHeaders(allParsedTabs);
+    console.log('Header groups:', headerGroups.map(g => ({ count: g.tabs.length, hasIdentical: g.hasIdenticalHeaders, names: g.tabs.map(t => t.tabName) })));
+    
+    // Store all groups and start with the first one
+    setAllHeaderGroups(headerGroups);
+    setCurrentGroupIndex(0);
+    
+    // Process the first group
+    if (headerGroups.length > 0) {
+      processHeaderGroup(headerGroups[0], 0, headerGroups.length);
+    }
   };
 
   // Parse all tabs when workbook is loaded
@@ -280,15 +421,11 @@ const FileUpload: React.FC<FileUploadProps> = ({ onTabsParsed, onAllTabsParsed }
 
   // Auto-continue processing when triggered
   React.useEffect(() => {
-    if (shouldContinueProcessing && selectedSheets.length > 0 && !headerPreview) {
-      console.log('Auto-continuing with next sheet:', selectedSheets[0]);
+    if (shouldContinueProcessing) {
+      console.log('Continuing processing...');
       setShouldContinueProcessing(false);
-      // Small delay to ensure state updates
-      setTimeout(() => {
-        handleConfirmSheets();
-      }, 100);
     }
-  }, [shouldContinueProcessing, selectedSheets, headerPreview]);
+  }, [shouldContinueProcessing]);
 
   // Handler for confirming header preview
   const handleHeaderConfirm = () => {

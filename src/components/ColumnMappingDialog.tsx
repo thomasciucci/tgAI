@@ -10,6 +10,8 @@ interface ColumnMappingDialogProps {
   tabName?: string;
   currentTabIndex?: number;
   totalTabs?: number;
+  isGroupedMapping?: boolean;
+  allTabNames?: string[];
   onConfirm: (mapping: { animalIdColumn: string; timeColumn: string; parameterColumns: string[] }) => void;
   onClose: () => void;
 }
@@ -20,6 +22,8 @@ const ColumnMappingDialog: React.FC<ColumnMappingDialogProps> = ({
   tabName, 
   currentTabIndex, 
   totalTabs, 
+  isGroupedMapping = false,
+  allTabNames = [],
   onConfirm, 
   onClose 
 }) => {
@@ -47,12 +51,34 @@ const ColumnMappingDialog: React.FC<ColumnMappingDialogProps> = ({
           <Typography variant="h5" sx={{ fontWeight: 700, mb: 1 }}>
             Step 2: Configure Data Import
           </Typography>
-          <Typography variant="body1" sx={{ color: '#E699C2', fontWeight: 500 }}>
-            Tab "{tabName || 'Unknown'}" ({currentTabIndex || 1} of {totalTabs || 1})
-          </Typography>
+          {isGroupedMapping ? (
+            <Box>
+              <Typography variant="body1" sx={{ color: '#E699C2', fontWeight: 500, mb: 1 }}>
+                🎉 All {totalTabs} tabs have identical headers! 
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#E699C2' }}>
+                Configure once for: {allTabNames.join(', ')}
+              </Typography>
+            </Box>
+          ) : (
+            <Typography variant="body1" sx={{ color: '#E699C2', fontWeight: 500 }}>
+              {totalTabs && totalTabs > 1 
+                ? `Configure data mapping for "${tabName}" (${currentTabIndex || 1} of ${totalTabs})`
+                : `Configure mapping for "${tabName || 'Unknown'}"`
+              }
+            </Typography>
+          )}
         </Box>
       </DialogTitle>
       <DialogContent sx={{ mt: 2 }}>
+        {isGroupedMapping && (
+          <Box sx={{ mb: 3, p: 2, bgcolor: '#F9ECEF', borderRadius: 2, border: '1px solid #EFCCDB' }}>
+            <Typography variant="body2" sx={{ color: '#8A0051', fontWeight: 500 }}>
+              💡 <strong>Smart Import:</strong> Since all your selected tabs have the same column structure, 
+              you only need to configure the mapping once. It will be applied to all {totalTabs} tabs automatically.
+            </Typography>
+          </Box>
+        )}
         <Box sx={{ mb: 2 }}>
           <Typography gutterBottom sx={{ fontWeight: 500, color: '#8A0051' }}>
             🐭 Which column contains the <b>Animal ID</b>?
@@ -126,9 +152,11 @@ const ColumnMappingDialog: React.FC<ColumnMappingDialogProps> = ({
           variant="contained"
           sx={{ px: 3 }}
         >
-          {currentTabIndex && totalTabs && currentTabIndex < totalTabs 
-            ? `Next Tab (${currentTabIndex + 1}/${totalTabs}) →` 
-            : 'Complete Import ✓'
+          {isGroupedMapping 
+            ? `Apply to All ${totalTabs} Tabs ✓`
+            : (totalTabs && totalTabs > 1 && currentTabIndex && currentTabIndex < totalTabs
+                ? `Next Tab (${currentTabIndex + 1}/${totalTabs}) →` 
+                : 'Complete Import ✓')
           }
         </Button>
       </DialogActions>

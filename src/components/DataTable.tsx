@@ -9,6 +9,7 @@ interface DataTableProps {
 }
 
 const DataTable: React.FC<DataTableProps> = ({ data, availableParameters, selectedParameter, onParameterChange }) => {
+
   if (!data || data.length === 0) {
     return <div>No data to display.</div>;
   }
@@ -27,17 +28,32 @@ const DataTable: React.FC<DataTableProps> = ({ data, availableParameters, select
     animalMap[row.animalId][row.studyDay] = row[selectedParameter];
   });
 
+
   return (
     <Box>
-      <Tabs
-        value={selectedParameter}
-        onChange={(_, val) => onParameterChange(val)}
-        sx={{ mb: 2 }}
-      >
-        {availableParameters.map(param => (
-          <Tab key={param} label={param} value={param} />
-        ))}
-      </Tabs>
+      <Box sx={{ mb: 2 }}>
+        <Tabs
+          value={selectedParameter}
+          onChange={(_, val) => onParameterChange(val)}
+          sx={{
+            '& .MuiTab-root': {
+              textTransform: 'none',
+              fontWeight: 500,
+            },
+            '& .Mui-selected': {
+              color: '#8A0051 !important',
+            },
+            '& .MuiTabs-indicator': {
+              backgroundColor: '#8A0051',
+            },
+          }}
+        >
+          {availableParameters.map(param => (
+            <Tab key={param} label={param} value={param} />
+          ))}
+        </Tabs>
+      </Box>
+      
       <TableContainer component={Paper} sx={{ maxHeight: 500 }}>
         <Table stickyHeader size="small">
           <TableHead>
