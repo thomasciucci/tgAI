@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "name": "tgai-tumor-study-analyzer",
+  "name": "tumor-study-analyzer",
   "builds": [
     {
       "src": "package.json",
@@ -12,8 +12,22 @@
   ],
   "routes": [
     {
+      "handle": "filesystem"
+    },
+    {
       "src": "/(.*)",
       "dest": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/static/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
     }
   ]
 }
